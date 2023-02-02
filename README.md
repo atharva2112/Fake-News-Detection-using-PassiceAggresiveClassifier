@@ -1,1 +1,1 @@
-# Fake-News-Detection-using-PassiceAggresiveClassifier
+# Fake-News-Detection-using-PassiveAggresiveClassifier
