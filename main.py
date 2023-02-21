@@ -5,6 +5,7 @@ import calendar
 import string
 import numpy as np
 import re
+import nltk
 from nltk.corpus import stopwords
 #%%
 def month_to_num(df):
@@ -33,11 +34,38 @@ print("Out of {} rows, {} are spam, {} are ham".format(len(main),len(main[main['
 print("Number of null in label: {}".format(main['label'].isnull().sum()))
 print("Number of null in text: {}".format(main['text'].isnull().sum()))
 #%%
-main["text_cleaned"] = 0
-for i in range(len(main)):
-    main["text_cleaned"][i] = re.split('\W+', main.text[i])
-#%%
+# Removing all the punctuations from the sentences
+def remove_punct(text):
+    text_nopunct = "".join([char for char in text if char not in string.punctuation])
+    return text_nopunct
 
+main['text_no_punct'] = main['text'].apply(lambda x: remove_punct(x))
+
+main.head()
+#%%
+# Separating each words of the sentence as the element of the list.
+def tokenize(text):
+    tokens = re.split('\W+', text)
+    return tokens
+
+main["text_cleaned"] = main.text_no_punct.apply(lambda x: tokenize(x.lower()))
+#%%
+# Removing stop words from the data
+stopword = nltk.corpus.stopwords.words('english')
+def remove_stopwords(tokenized_list):
+    text = [word for word in tokenized_list if word not in stopword]
+    return text
+
+main['text_nostop'] = main['text_cleaned'].apply(lambda x: remove_stopwords(x))
+main.head()
+#%%
+# Lemmatizing the text
+wn = nltk.WordNetLemmatizer()
+def lemmatizing(tokenized_text):
+    text = [wn.lemmatize(word) for word in tokenized_text]
+    return text
+main['text_lemmatized'] = main['text_nostop'].apply(lambda x: lemmatizing(x))
+main.head(10)
 #%%
 # Visualizing the true data
 true.subject.value_counts().plot.bar()
