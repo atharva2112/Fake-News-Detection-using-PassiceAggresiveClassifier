@@ -64,7 +64,7 @@ import re
 import nltk
 from bs4 import BeautifulSoup
 from nltk.corpus import stopwords
-from sklearn.model_selection import train_test_split, cross_val_score, GridSearchCV
+from sklearn.model_selection import train_test_split, cross_val_score, RandomizedSearchCV
 from sklearn.metrics import accuracy_score, classification_report
 from sklearn.linear_model import PassiveAggressiveClassifier, LogisticRegression
 from sklearn.pipeline import Pipeline
@@ -72,7 +72,9 @@ from vaderSentiment.vaderSentiment import SentimentIntensityAnalyzer
 from sklearn.feature_extraction.text import TfidfVectorizer
 from sentence_transformers import SentenceTransformer
 from sklearn.compose import ColumnTransformer
+from sklearn.base import BaseEstimator, TransformerMixin
 from sklearn.preprocessing import FunctionTransformer
+from sklearn.decomposition import TruncatedSVD
 #%%
 nltk.download('stopwords')
 nltk.download('wordnet')
@@ -94,44 +96,53 @@ fake["label"] = 0
 data = pd.concat([true, fake], ignore_index=True)
 data['text'] = data['text'].apply(clean_text)
 
-X_train, X_test, y_train, y_test = train_test_split(data['text'], data['label'], test_size=0.2, random_state=42)
+X_train, X_test, y_train, y_test = train_test_split(data[['text']], data['label'], test_size=0.2, random_state=42)
 #%%
-def sentiment_features(texts):
-    sentiment_analyzer = SentimentIntensityAnalyzer()
-    sentiment_scores = [sentiment_analyzer.polarity_scores(text) for text in texts]
-    sentiment_scores_df = pd.DataFrame(sentiment_scores)
-    return sentiment_scores_df[['neg', 'neu', 'pos', 'compound']].values
+class SentimentTransformer(BaseEstimator, TransformerMixin):
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X, y=None):
+        sentiment_analyzer = SentimentIntensityAnalyzer()
+        sentiment_scores = [sentiment_analyzer.polarity_scores(text) for text in X['text']]
+        sentiment_scores_df = pd.DataFrame(sentiment_scores)
+        return sentiment_scores_df[['neg', 'neu', 'pos', 'compound']].values
+
 #%%
-embedder = SentenceTransformer("sentence-transformers/all-mpnet-base-v1")
-#%%
-def embed_text(texts):
-    return embedder.encode(texts)
-#%%
+class EmbeddingTransformer(BaseEstimator, TransformerMixin):
+    def fit(self, X, y=None):
+        return self
+
+    def transform(self, X, y=None):
+        embedder = SentenceTransformer("sentence-transformers/distilbert-base-nli-mean-tokens")
+        return embedder.encode(X['text'].tolist())
+
 column_transformer = ColumnTransformer(
     transformers=[
-        ('sentiment', FunctionTransformer(sentiment_features, validate=False), 'text'),
-        ('embedding', FunctionTransformer(embed_text, validate=False), 'text')
+        ('sentiment', SentimentTransformer(), ['text']),
+        ('embedding', EmbeddingTransformer(), ['text'])
     ],
     remainder='drop'
 )
 #%%
 model_pipeline = Pipeline([
     ('features', column_transformer),
+    ('dimensionality_reduction', TruncatedSVD(n_components=100)),
     ('model', PassiveAggressiveClassifier())
 ])
-#%%
+
 param_grid = {
     'model__C': [0.1, 1, 10],
     'model__max_iter': [1000, 2000]
 }
 #%%
-grid_search = GridSearchCV(model_pipeline, param_grid, cv=5)
-grid_search.fit(X_train.to_frame(), y_train)
+n_iter_search = 1
+random_search = RandomizedSearchCV(model_pipeline, param_distributions=param_grid, n_iter=n_iter_search, cv=3, random_state=42, n_jobs=-1, error_score='raise')
+random_search.fit(X_train, y_train)
 
-print("Best hyperparameters:", grid_search.best_params_)
-print("Train accuracy:", grid_search.best_score_)
+print("Best hyperparameters:", random_search.best_params_)
+print("Train accuracy:", random_search.best_score_)
 #%%
-y_pred = grid_search.predict(X_test.to_frame())
+y_pred = random_search.predict(X_test)
 print("Test accuracy:", accuracy_score(y_test, y_pred))
-print("Classification report:", classification_report(y_test, y_pred))
-
+print("Classification report:\n", classification_report(y_test, y_pred))
